@@ -1,9 +1,9 @@
 import { CreateMeetingPayload, CreateParticipantPayload, Meeting, Participant } from "@/types/meeting"
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1"
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api/v1"
 
 export async function fetchMeetings(search?: string): Promise<Meeting[]> {
-  const url = new URL(`${API_BASE}/meetings`)
+  const url = new URL(`${API_BASE}/meetings`, window.location.origin)
   if (search) {
     url.searchParams.set("search", search)
   }

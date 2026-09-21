@@ -1,0 +1,10 @@
+aws_region        = "us-east-1"
+project_name      = "meeting-app"
+environment       = "production"
+db_name           = "meetings_db"
+db_username       = "postgres"
+db_password       = "ReplaceWithStrongPassword2026!"
+db_instance_class = "db.t3.micro"
+fargate_cpu       = "256"
+fargate_memory    = "512"
+cors_origins      = ["*"]
