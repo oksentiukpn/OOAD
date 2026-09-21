@@ -146,7 +146,7 @@ infra-apply: check-aws
 .PHONY: infra-destroy
 infra-destroy: check-aws
 	@echo "Destroying AWS resources in $(AWS_REGION)..."
-	terraform -chdir=$(INFRA_DIR) destroy
+	terraform -chdir=$(INFRA_DIR) destroy -auto-approve
 
 .PHONY: infra-output
 infra-output:

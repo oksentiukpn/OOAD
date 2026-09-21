@@ -1,0 +1,101 @@
+name: Deploy to AWS ECS Fargate
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_REGION: eu-north-1
+  ECS_CLUSTER: meeting-app-cluster
+  ECS_SERVICE: meeting-app-app-service
+  BACKEND_ECR_REPO: meeting-app-backend
+  FRONTEND_ECR_REPO: meeting-app-frontend
+  ALB_URL: http://meeting-app-alb-1524693853.eu-north-1.elb.amazonaws.com
+  SITE_URL: https://1233.pp.ua
+
+jobs:
+  deploy:
+    name: Build, Push & Deploy to ECS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Backend Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./back
+          file: ./back/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.BACKEND_ECR_REPO }}:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.BACKEND_ECR_REPO }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Frontend Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./front
+          file: ./front/Dockerfile
+          push: true
+          platforms: linux/amd64
+          build-args: |
+            VITE_API_BASE_URL=/api/v1
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.FRONTEND_ECR_REPO }}:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.FRONTEND_ECR_REPO }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trigger ECS Rolling Deployment
+        run: |
+          echo "Triggering new deployment on ECS Fargate..."
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --force-new-deployment \
+            --region "${{ secrets.AWS_REGION || env.AWS_REGION }}"
+
+      - name: Wait for ECS Service Steady State
+        run: |
+          echo "Waiting for ECS service to reach steady state..."
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --region "${{ secrets.AWS_REGION || env.AWS_REGION }}"
+          echo "ECS service is now steady!"
+
+      - name: Verify Health Check Endpoints
+        run: |
+          echo "Checking ALB frontend root and backend health endpoints..."
+          for i in {1..20}; do
+            FE_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$ALB_URL/" || true)
+            BE_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$ALB_URL/health" || true)
+            echo "Attempt $i: Frontend HTTP $FE_CODE, Backend Health HTTP $BE_CODE"
+            if [ "$FE_CODE" = "200" ] && [ "$BE_CODE" = "200" ]; then
+              echo "Deployment verified! Both frontend and backend are reporting HTTP 200."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Health check verification failed or timed out."
+          exit 1
